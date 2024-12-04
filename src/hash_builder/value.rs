@@ -13,11 +13,17 @@ pub struct HashBuilderValue {
     buf: Vec<u8>,
     /// The kind of value that is stored in `buf`.
     kind: HashBuilderValueKind,
+    #[cfg_attr(feature = "serde", serde(skip))]
+    _hash: B256,
 }
 
 impl Default for HashBuilderValue {
     fn default() -> Self {
-        Self { buf: Vec::with_capacity(128), kind: HashBuilderValueKind::default() }
+        Self {
+            buf: Vec::with_capacity(128),
+            kind: HashBuilderValueKind::default(),
+            _hash: B256::default(),
+        }
     }
 }
 
@@ -31,11 +37,14 @@ impl fmt::Debug for HashBuilderValue {
 impl<'u> arbitrary::Arbitrary<'u> for HashBuilderValue {
     fn arbitrary(g: &mut arbitrary::Unstructured<'u>) -> arbitrary::Result<Self> {
         let kind = HashBuilderValueKind::arbitrary(g)?;
-        let buf = match kind {
-            HashBuilderValueKind::Bytes => Vec::arbitrary(g)?,
-            HashBuilderValueKind::Hash => B256::arbitrary(g)?.to_vec(),
+        let (buf, _hash) = match kind {
+            HashBuilderValueKind::Bytes => (Vec::arbitrary(g)?, B256::default()),
+            HashBuilderValueKind::Hash => {
+                let _hash = B256::arbitrary(g)?;
+                (_hash.to_vec(), _hash)
+            },
         };
-        Ok(Self { buf, kind })
+        Ok(Self { buf, kind, _hash })
     }
 }
 
@@ -54,7 +63,14 @@ impl proptest::arbitrary::Arbitrary for HashBuilderValue {
                     HashBuilderValueKind::Hash => 32..=32,
                 };
                 proptest::collection::vec(any::<u8>(), range)
-                    .prop_map(move |buf| Self { buf, kind })
+                    .prop_map(move |buf| {
+                        let _hash = if kind == HashBuilderValueKind::Hash {
+                            B256::from_slice(&buf)
+                        } else {
+                            B256::default()
+                        };
+                        Self { buf, kind, _hash }
+                    })
             })
             .boxed()
     }
@@ -73,7 +89,7 @@ impl HashBuilderValue {
             HashBuilderValueKind::Bytes => HashBuilderValueRef::Bytes(&self.buf),
             HashBuilderValueKind::Hash => {
                 debug_assert_eq!(self.buf.len(), 32);
-                HashBuilderValueRef::Hash(unsafe { self.buf[..].try_into().unwrap_unchecked() })
+                HashBuilderValueRef::Hash(&self._hash)
             }
         }
     }
@@ -95,6 +111,10 @@ impl HashBuilderValue {
         self.buf.clear();
         self.buf.extend_from_slice(value.as_slice());
         self.kind = value.kind();
+        self._hash = match value {
+            HashBuilderValueRef::Bytes(_) => B256::default(),
+            HashBuilderValueRef::Hash(hash) => *hash,
+        };
     }
 
     /// Clears the value.
@@ -102,6 +122,7 @@ impl HashBuilderValue {
     pub fn clear(&mut self) {
         self.buf.clear();
         self.kind = HashBuilderValueKind::default();
+        self._hash = B256::default();
     }
 }
 

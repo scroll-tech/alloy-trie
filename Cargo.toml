@@ -91,3 +91,6 @@ arbitrary = [
 name = "bench"
 harness = false
 required-features = ["arbitrary"]
+
+[patch.crates-io]
+alloy-primitives = { git = "https://github.com/scroll-tech/alloy-core", branch = "v0.8.14" }
